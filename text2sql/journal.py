@@ -1,17 +1,19 @@
 """Journal d'audit : chaque question est tracée en JSON Lines (traçabilité, conformité)."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from text2sql.config import JOURNAL, MODELE
 from text2sql.llm import Resultat
 
 
-def entree_journal(res: Resultat, mode: str) -> dict:
+def entree_journal(res: Resultat, mode: str, utilisateur: str | None = None, source: str | None = None) -> dict:
     """Construit l'entrée de journal d'un résultat (sans les données renvoyées)."""
     return {
-        "horodatage": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "horodatage": datetime.now(UTC).isoformat(timespec="seconds"),
+        "utilisateur": utilisateur,
+        "source": source,
         "mode": mode,
         "modele": MODELE if mode == "api" else None,
         "question": res.question,
@@ -27,7 +29,8 @@ def entree_journal(res: Resultat, mode: str) -> dict:
     }
 
 
-def journaliser(res: Resultat, mode: str, chemin: str = JOURNAL) -> None:
+def journaliser(res: Resultat, mode: str, chemin: str = JOURNAL, utilisateur: str | None = None,
+                source: str | None = None) -> None:
     """Ajoute une ligne au journal ; ne fait jamais échouer l'application."""
     if not chemin:
         return
@@ -35,6 +38,6 @@ def journaliser(res: Resultat, mode: str, chemin: str = JOURNAL) -> None:
         fichier = Path(chemin)
         fichier.parent.mkdir(parents=True, exist_ok=True)
         with fichier.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entree_journal(res, mode), ensure_ascii=False) + "\n")
+            f.write(json.dumps(entree_journal(res, mode, utilisateur, source), ensure_ascii=False) + "\n")
     except OSError:
         pass

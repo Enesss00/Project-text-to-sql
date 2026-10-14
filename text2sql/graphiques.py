@@ -124,7 +124,7 @@ def _infobulle(*colonnes: tuple[str, str]) -> list:
 def graphique_barres(df: pd.DataFrame, x: str, y: str, theme: str) -> alt.Chart:
     """Barres horizontales triées, fines, bout arrondi, valeur en bout de barre."""
     couleur, (_, encre_2, _) = PALETTE[theme][0], ENCRE[theme]
-    hauteur = max(120, 28 * len(df))
+    hauteur = alt.Step(32)   # hauteur fixe par catégorie : la barre de 18 px garde son espace
     base = alt.Chart(df).encode(
         y=alt.Y(f"{x}:N", sort="-x", title=None),
         x=alt.X(f"{y}:Q", title=y.replace("_", " ")),
@@ -133,8 +133,9 @@ def graphique_barres(df: pd.DataFrame, x: str, y: str, theme: str) -> alt.Chart:
     barres = base.mark_bar(color=couleur, size=18, cornerRadiusEnd=4)
     if len(df) > MAX_BARRES_ETIQUETEES:
         return barres.properties(height=hauteur)
+    format_valeur = ",.0f" if df[y].abs().max() >= 100 else ",.2f"   # pourcentages, taux : 2 décimales
     valeurs = base.mark_text(align="left", dx=6, color=encre_2).encode(
-        text=alt.Text(f"{y}:Q", format=",.0f"))
+        text=alt.Text(f"{y}:Q", format=format_valeur))
     return (barres + valeurs).properties(height=hauteur)
 
 

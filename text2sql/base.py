@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from text2sql.securite import ouvrir_connexion_securisee, ouvrir_lecture_seule
+from text2sql.securite import ouvrir_connexion_securisee, ouvrir_lecture_seule, traduire_refus
 
 ENTETE_SQLITE = b"SQLite format 3\x00"
 MAX_VALEURS_LISTEES = 15
@@ -46,11 +46,15 @@ def _decrire_colonne(conn: sqlite3.Connection, table: str, nom: str, type_col: s
     return detail
 
 
-def decrire_table(conn: sqlite3.Connection, table: str) -> str:
-    """Décrit une table : nombre de lignes et colonnes enrichies."""
+def decrire_table(conn: sqlite3.Connection, table: str, protegees: frozenset[str] = frozenset(),
+                  valeurs: bool = True) -> str:
+    """Décrit une table : nombre de lignes et colonnes enrichies, sans les colonnes protégées."""
     nb = conn.execute(f"SELECT COUNT(*) FROM {ident(table)}").fetchone()[0]
     lignes = [f"Table {table} ({nb} lignes) :"]
-    lignes += [_decrire_colonne(conn, table, nom, t) for nom, t in _colonnes(conn, table)]
+    for nom, type_col in _colonnes(conn, table):
+        if f"{table}.{nom}".lower() in protegees:
+            continue
+        lignes.append(_decrire_colonne(conn, table, nom, type_col) if valeurs else f"  - {nom} {type_col}")
     return "\n".join(lignes)
 
 
@@ -62,19 +66,29 @@ def lister_tables(chemin: Path) -> list[str]:
             "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
 
 
-def lire_schema(chemin: Path) -> str:
-    """Lit automatiquement le schéma complet de la base (PRAGMA) sous forme de texte."""
+def lire_schema(chemin: Path, protegees: frozenset[str] = frozenset(), valeurs: bool = True) -> str:
+    """Lit automatiquement le schéma de la base (PRAGMA), colonnes protégées exclues.
+
+    `valeurs=False` n'envoie que les noms et types : aucune donnée ne quitte alors la base.
+    """
     tables = lister_tables(chemin)
     with closing(ouvrir_lecture_seule(chemin)) as conn:
-        return "\n\n".join(decrire_table(conn, t) for t in tables)
+        texte = "\n\n".join(decrire_table(conn, t, protegees, valeurs) for t in tables)
+    if protegees:
+        texte += "\n\nCertaines colonnes sont protégées (données personnelles) : elles ne sont pas listées."
+    return texte
 
 
 # --- Exécution ---------------------------------------------------------------
 
-def executer_requete(chemin: Path, sql: str) -> pd.DataFrame:
+def executer_requete(chemin: Path, sql: str, protegees: frozenset[str] = frozenset()) -> pd.DataFrame:
     """Exécute une requête déjà validée sur une connexion verrouillée."""
-    with closing(ouvrir_connexion_securisee(chemin)) as conn:
-        return pd.read_sql_query(sql, conn)
+    with closing(ouvrir_connexion_securisee(chemin, colonnes_protegees=protegees)) as conn:
+        try:
+            return pd.read_sql_query(sql, conn)
+        except pd.errors.DatabaseError as e:
+            cause = e.__cause__ if isinstance(e.__cause__, sqlite3.DatabaseError) else e
+            raise traduire_refus(cause) from e
 
 
 # --- Import de fichiers utilisateur -----------------------------------------

@@ -1,0 +1,106 @@
+# Profil métier « Banque de détail » : modifiable par les équipes métier, sans toucher au code.
+# Données de démonstration fictives générées par seed_banque.py.
+
+nom = "Banque de détail"
+description = "Agences, clients, comptes, transactions et crédits (données fictives, année 2025)"
+base = "banque.db"
+
+# Vocabulaire maison : chaque terme est transmis au modèle avec sa définition.
+[glossaire]
+"encours" = "Capital restant dû des crédits : SUM(credits.encours)."
+"production" = "Montant des crédits octroyés sur la période : SUM(credits.montant_initial), filtré sur credits.date_octroi."
+"taux de défaut" = "Part des crédits au statut 'Défaut', en % du nombre de crédits : 100.0 * SUM(statut = 'Défaut') / COUNT(*)."
+"NPL / créances douteuses" = "Crédits au statut 'Défaut'. Le taux de NPL se calcule sur l'encours : encours en défaut / encours total."
+"crédits en retard" = "Crédits au statut 'Retard < 90 j'."
+"collecte nette" = "Somme des montants des transactions sur les comptes d'épargne (tout type sauf 'Compte courant') : entrées positives, sorties négatives."
+"épargne / dépôts d'épargne" = "Soldes des comptes de type 'Livret A', 'LDDS', 'PEL', 'Assurance-vie' et 'Compte à terme'."
+"dépôts à vue" = "Soldes des comptes de type 'Compte courant'."
+"taux moyen" = "Moyenne des taux nominaux (credits.taux, en %). Pondérer par le montant si l'on demande un taux moyen pondéré."
+"PNB" = "Non disponible dans cette base : répondre que la question est hors périmètre."
+
+# Colonnes protégées : jamais décrites au modèle, et toute requête qui les lit est bloquée par le moteur SQL.
+[gouvernance]
+colonnes_protegees = ["clients.nom", "clients.date_naissance", "comptes.iban"]
+
+[[exemples]]
+question = "Quel est l'encours total des crédits ?"
+sql = "SELECT ROUND(SUM(encours), 2) AS encours_total FROM credits"
+
+[[exemples]]
+question = "Encours de crédit immobilier par agence"
+sql = """SELECT a.nom AS agence, ROUND(SUM(cr.encours), 2) AS encours
+FROM credits cr
+JOIN clients c ON c.id = cr.client_id
+JOIN agences a ON a.id = c.agence_id
+WHERE cr.type = 'Immobilier'
+GROUP BY a.nom ORDER BY encours DESC"""
+
+[[exemples]]
+question = "Production mensuelle de crédits en 2025"
+sql = """SELECT strftime('%Y-%m', date_octroi) AS mois, ROUND(SUM(montant_initial), 2) AS production
+FROM credits
+WHERE strftime('%Y', date_octroi) = '2025'
+GROUP BY mois ORDER BY mois"""
+
+[[exemples]]
+question = "Taux de défaut par type de crédit"
+sql = """SELECT type, ROUND(100.0 * SUM(statut = 'Défaut') / COUNT(*), 2) AS taux_defaut_pct
+FROM credits
+GROUP BY type ORDER BY taux_defaut_pct DESC"""
+
+# Questions pré-enregistrées du mode démo (sans clé API).
+[[demo]]
+question = "Encours de crédit par agence"
+sql = """SELECT a.nom AS agence, ROUND(SUM(cr.encours), 2) AS encours
+FROM credits cr
+JOIN clients c ON c.id = cr.client_id
+JOIN agences a ON a.id = c.agence_id
+GROUP BY a.nom ORDER BY encours DESC"""
+
+[[demo]]
+question = "Et seulement pour l'immobilier ?"
+sql = """SELECT a.nom AS agence, ROUND(SUM(cr.encours), 2) AS encours
+FROM credits cr
+JOIN clients c ON c.id = cr.client_id
+JOIN agences a ON a.id = c.agence_id
+WHERE cr.type = 'Immobilier'
+GROUP BY a.nom ORDER BY encours DESC"""
+
+[[demo]]
+question = "Production mensuelle de crédits par type en 2025"
+sql = """SELECT strftime('%Y-%m', date_octroi) AS mois, type, ROUND(SUM(montant_initial), 2) AS production
+FROM credits
+WHERE strftime('%Y', date_octroi) = '2025'
+GROUP BY mois, type ORDER BY mois"""
+
+[[demo]]
+question = "Collecte nette mensuelle sur l'épargne"
+sql = """SELECT strftime('%Y-%m', t.date) AS mois, ROUND(SUM(t.montant), 2) AS collecte_nette
+FROM transactions t
+JOIN comptes co ON co.id = t.compte_id
+WHERE co.type <> 'Compte courant'
+GROUP BY mois ORDER BY mois"""
+
+[[demo]]
+question = "Taux de défaut par segment de clientèle"
+sql = """SELECT c.segment, ROUND(100.0 * SUM(cr.statut = 'Défaut') / COUNT(*), 2) AS taux_defaut_pct
+FROM credits cr
+JOIN clients c ON c.id = cr.client_id
+GROUP BY c.segment ORDER BY taux_defaut_pct DESC"""
+
+[[demo]]
+question = "Taux moyen des crédits immobiliers octroyés en 2025"
+sql = """SELECT ROUND(AVG(taux), 2) AS taux_moyen_pct
+FROM credits
+WHERE type = 'Immobilier' AND strftime('%Y', date_octroi) = '2025'"""
+
+[[demo]]
+question = "Affiche les IBAN des clients en défaut"
+sql = """SELECT co.iban, cr.encours
+FROM credits cr
+JOIN comptes co ON co.client_id = cr.client_id
+WHERE cr.statut = 'Défaut'"""
+
+[[demo]]
+question = "Supprime les crédits en défaut"
+sql = "DELETE FROM credits WHERE statut = 'Défaut'"

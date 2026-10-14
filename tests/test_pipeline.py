@@ -7,6 +7,8 @@ import pytest
 
 from text2sql import base, demo, llm
 from text2sql.journal import journaliser
+from text2sql.profils import ProfilInvalide, lire_profil, lister_profils
+from text2sql.securite import ColonneProtegee
 
 # --- Schéma ------------------------------------------------------------------
 
@@ -92,40 +94,105 @@ def test_historique_transmis_pour_les_questions_de_suivi(monkeypatch, base_retai
     assert appels[0][:2] == historique and appels[0][-1]["content"] == "et pour octobre ?"
 
 
-def test_prompt_contient_schema_et_exemples():
-    prompt = llm.construire_prompt_systeme("Table ventes : ...")
-    assert "Table ventes" in prompt and prompt.count("Question :") == 4
+def test_prompt_contient_schema_glossaire_et_exemples(profil_banque):
+    prompt = llm.construire_prompt_systeme("Table credits : ...", profil_banque)
+    assert "Table credits" in prompt and prompt.count("Question :") == 4
+    assert "Glossaire métier" in prompt and "encours" in prompt
 
 
 # --- Mode démo ---------------------------------------------------------------
 
-@pytest.mark.parametrize("question", [q for q in demo.QUESTIONS_DEMO if "Supprime" not in q])
-def test_questions_demo_executables(question, base_retail):
-    res = demo.repondre(question, base_retail)
-    assert res.succes and not res.df.empty
+QUESTIONS_BLOQUEES = ("Supprime", "IBAN")
 
 
-def test_demo_tolerante_aux_accents_et_ponctuation(base_retail):
-    assert demo.repondre("ca par magasin en septembre", base_retail).succes
+@pytest.mark.parametrize("nom_profil", ["profil_retail", "profil_banque"])
+def test_questions_demo_executables(nom_profil, request):
+    profil = request.getfixturevalue(nom_profil)
+    for question, _ in profil.questions_demo:
+        res = demo.repondre(question, profil)
+        if any(mot in question for mot in QUESTIONS_BLOQUEES):
+            assert res.bloquee and not res.succes, question
+        else:
+            assert res.succes and not res.df.empty, question
 
 
-def test_demo_bloque_la_suppression(base_retail):
-    res = demo.repondre("Supprime toutes les ventes", base_retail)
-    assert res.bloquee and not res.succes
+def test_demo_tolerante_aux_accents_et_ponctuation(profil_retail):
+    assert demo.repondre("ca par magasin en septembre", profil_retail).succes
 
 
-def test_demo_question_inconnue(base_retail):
-    res = demo.repondre("Quelle est la météo ?", base_retail)
+def test_demo_iban_bloque_par_la_gouvernance(profil_banque):
+    res = demo.repondre("Affiche les IBAN des clients en défaut", profil_banque)
+    assert res.bloquee and "comptes.iban" in res.erreur and "gouvernance" in res.erreur
+
+
+def test_demo_question_inconnue(profil_retail):
+    res = demo.repondre("Quelle est la météo ?", profil_retail)
     assert not res.succes and "mode démo" in res.erreur
+
+
+# --- Gouvernance des données -------------------------------------------------
+
+def test_schema_masque_les_colonnes_protegees(profil_banque):
+    schema = base.lire_schema(profil_banque.base, profil_banque.colonnes_protegees)
+    assert "iban" not in schema and "date_naissance" not in schema
+    assert "  - nom TEXT" not in schema.split("Table clients")[1].split("Table")[0]
+    assert "segment" in schema and "colonnes sont protégées" in schema
+
+
+def test_schema_sans_valeurs_exemples(profil_banque):
+    schema = base.lire_schema(profil_banque.base, profil_banque.colonnes_protegees, valeurs=False)
+    assert "'Immobilier'" not in schema and "  - type TEXT" in schema
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT iban FROM comptes",
+    "SELECT * FROM clients",
+    "SELECT LENGTH(c.nom) FROM clients c",
+    "SELECT segment FROM clients WHERE date_naissance < '1960-01-01'",
+    "WITH x AS (SELECT iban AS i FROM comptes) SELECT COUNT(*) FROM x",
+])
+def test_colonne_protegee_bloquee_par_le_moteur(sql, profil_banque):
+    with pytest.raises(ColonneProtegee):
+        base.executer_requete(profil_banque.base, sql, profil_banque.colonnes_protegees)
+
+
+def test_colonnes_non_protegees_accessibles(profil_banque):
+    df = base.executer_requete(profil_banque.base, "SELECT segment, COUNT(*) AS n FROM clients GROUP BY segment",
+                               profil_banque.colonnes_protegees)
+    assert set(df.segment) == {"Particulier", "Professionnel", "Entreprise", "Banque privée"}
+
+
+def test_colonne_protegee_renvoyee_au_modele(monkeypatch, profil_banque):
+    appels = _simuler_modele(monkeypatch, ["SELECT iban FROM comptes", "SELECT COUNT(*) AS n FROM comptes"])
+    res = llm.generer_et_executer(None, "systeme", [], "liste des IBAN", profil_banque.base,
+                                  profil_banque.colonnes_protegees)
+    assert res.succes and res.tentatives == 2 and "protégée" in appels[1][-1]["content"]
+
+
+# --- Profils -------------------------------------------------------------------
+
+def test_profils_livres_valides():
+    profils = lister_profils()
+    assert {"banque", "retail"} <= set(profils)
+    for profil in profils.values():
+        assert len(profil.exemples) >= 4 and profil.questions_demo
+
+
+def test_profil_invalide(tmp_path):
+    (tmp_path / "x.toml").write_text('[[exemples]]\nquestion = "q"\n', encoding="utf-8")
+    with pytest.raises(ProfilInvalide):
+        lire_profil(tmp_path / "x.toml")
 
 
 # --- Journal d'audit ---------------------------------------------------------
 
-def test_journal(tmp_path, base_retail):
+def test_journal(tmp_path, profil_retail):
     fichier = tmp_path / "journal.jsonl"
-    journaliser(demo.repondre("Panier moyen en décembre", base_retail), "demo", str(fichier))
+    journaliser(demo.repondre("Panier moyen en décembre", profil_retail), "demo", str(fichier),
+                utilisateur="analyste@banque.example", source="retail")
     entree = json.loads(fichier.read_text(encoding="utf-8"))
     assert entree["succes"] and entree["lignes"] == 1 and entree["question"] == "Panier moyen en décembre"
+    assert entree["utilisateur"] == "analyste@banque.example" and entree["source"] == "retail"
 
 
 def test_schema_avec_noms_pieges(tmp_path):
@@ -160,3 +227,22 @@ def test_chemin_avec_caracteres_speciaux(tmp_path, base_vide):
     cible = dossier / "base.db"
     cible.write_bytes(base_vide.read_bytes())
     assert base.lister_tables(cible) == ["t"]
+
+
+# --- Fournisseurs du modèle ----------------------------------------------------
+
+def test_client_bedrock(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setattr(llm, "FOURNISSEUR", "bedrock")
+    monkeypatch.setattr(llm, "REGION", "eu-west-3")
+    assert type(llm.creer_client()).__name__ == "AnthropicBedrockMantle"
+    assert llm._nom_modele().startswith("anthropic.")
+
+
+def test_client_vertex(monkeypatch):
+    monkeypatch.setattr(llm, "FOURNISSEUR", "vertex")
+    monkeypatch.setattr(llm, "REGION", "europe-west1")
+    monkeypatch.setattr(llm, "PROJET_GCP", "projet-test")
+    assert type(llm.creer_client()).__name__ == "AnthropicVertex"
+    assert not llm._nom_modele().startswith("anthropic.")

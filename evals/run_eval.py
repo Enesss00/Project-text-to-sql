@@ -17,12 +17,13 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
 
-import anthropic  # noqa: E402
-
 from text2sql import base, llm  # noqa: E402
-from text2sql.config import DB_DEMO, MODELE  # noqa: E402
+from text2sql.config import DOSSIER_PROFILS, MODELE  # noqa: E402
+from text2sql.profils import lire_profil  # noqa: E402
 
 QUESTIONS = Path(__file__).with_name("questions.json")
+PROFIL = lire_profil(DOSSIER_PROFILS / "retail.toml")   # les questions portent sur la base retail
+DB_DEMO = PROFIL.base
 
 
 def normaliser_valeur(v):
@@ -70,8 +71,8 @@ def evaluer_cas(client, systeme: str, cas: dict) -> dict:
 
 def main() -> None:
     cas = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    client = anthropic.Anthropic()
-    systeme = llm.construire_prompt_systeme(base.lire_schema(DB_DEMO))
+    client = llm.creer_client()
+    systeme = llm.construire_prompt_systeme(base.lire_schema(DB_DEMO), PROFIL)
     debut, resultats = time.monotonic(), []
     for c in cas:
         r = evaluer_cas(client, systeme, c)

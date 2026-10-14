@@ -4,3 +4,5 @@ __pycache__/
 .ruff_cache/
 logs/
 evals/resultats*.json
+banque.db
+.streamlit/secrets.toml

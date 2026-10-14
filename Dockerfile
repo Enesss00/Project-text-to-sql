@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN python seed_db.py && useradd --create-home appuser && chown -R appuser /app
+RUN python seed_db.py && python seed_banque.py && useradd --create-home appuser && chown -R appuser /app
 USER appuser
 
 EXPOSE 8501

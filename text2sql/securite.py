@@ -1,7 +1,8 @@
 """Sécurité SQL en trois couches.
 
 1. Filtre syntaxique : une seule instruction SELECT/WITH, sans mot-clé dangereux.
-2. Autorisateur SQLite : le moteur lui-même refuse toute opération autre que la lecture.
+2. Autorisateur SQLite : le moteur lui-même refuse toute opération autre que la lecture,
+   ainsi que la lecture des colonnes protégées par la gouvernance (données personnelles).
 3. Connexion en lecture seule (mode=ro) avec délai maximal d'exécution.
 """
 
@@ -29,6 +30,10 @@ ACTIONS_AUTORISEES = {
 
 class RequeteRefusee(Exception):
     """Levée quand une requête SQL ne passe pas le filtre de sécurité."""
+
+
+class ColonneProtegee(RequeteRefusee):
+    """Levée quand une requête lit une colonne protégée par la gouvernance."""
 
 
 # --- Couche 1 : filtre syntaxique --------------------------------------------
@@ -77,9 +82,23 @@ def securiser_requete(sql: str) -> str:
 
 # --- Couches 2 et 3 : connexion verrouillée ----------------------------------
 
-def _autorisateur(action, *_):
-    """Callback SQLite : n'autorise que les opérations de lecture."""
-    return sqlite3.SQLITE_OK if action in ACTIONS_AUTORISEES else sqlite3.SQLITE_DENY
+def creer_autorisateur(colonnes_protegees: frozenset[str] = frozenset()):
+    """Callback SQLite : lecture seule, et aucune lecture des colonnes « table.colonne » protégées."""
+    def autoriser(action, table, colonne, *_):
+        if action not in ACTIONS_AUTORISEES:
+            return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_READ and f"{table}.{colonne}".lower() in colonnes_protegees:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    return autoriser
+
+
+def traduire_refus(erreur: sqlite3.DatabaseError) -> Exception:
+    """Transforme un refus de l'autorisateur sur une colonne en ColonneProtegee explicite."""
+    refus = re.search(r"access to (\S+) is prohibited", str(erreur))
+    if refus:
+        return ColonneProtegee(f"Colonne protégée par la politique de gouvernance : {refus.group(1)}.")
+    return erreur
 
 
 def _limiteur_de_temps(timeout_s: float):
@@ -93,9 +112,10 @@ def ouvrir_lecture_seule(chemin: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{quote(str(Path(chemin).resolve()))}?mode=ro", uri=True)
 
 
-def ouvrir_connexion_securisee(chemin: Path, timeout_s: float = TIMEOUT_REQUETE_S) -> sqlite3.Connection:
+def ouvrir_connexion_securisee(chemin: Path, timeout_s: float = TIMEOUT_REQUETE_S,
+                               colonnes_protegees: frozenset[str] = frozenset()) -> sqlite3.Connection:
     """Connexion pour exécuter du SQL généré : lecture seule + autorisateur + délai maximal."""
     conn = ouvrir_lecture_seule(chemin)
-    conn.set_authorizer(_autorisateur)
+    conn.set_authorizer(creer_autorisateur(colonnes_protegees))
     conn.set_progress_handler(_limiteur_de_temps(timeout_s), 10_000)
     return conn

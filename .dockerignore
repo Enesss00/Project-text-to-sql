@@ -9,3 +9,5 @@ tests
 evals/resultats*
 .env
 .env.*
+banque.db
+.streamlit/secrets.toml

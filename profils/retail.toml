@@ -1,0 +1,77 @@
+# Profil métier « Commerce de détail » : données fictives générées par seed_db.py.
+
+nom = "Commerce de détail"
+description = "Magasins, produits, clients et ventes (données fictives, année 2025)"
+base = "retail.db"
+
+[glossaire]
+"CA / chiffre d'affaires" = "Somme des montants de vente : SUM(ventes.montant)."
+"panier moyen" = "Montant moyen d'une vente : AVG(ventes.montant)."
+
+[gouvernance]
+colonnes_protegees = []
+
+[[exemples]]
+question = "Quel est le chiffre d'affaires total ?"
+sql = "SELECT ROUND(SUM(montant), 2) AS chiffre_affaires FROM ventes"
+
+[[exemples]]
+question = "CA par magasin en mars"
+sql = """SELECT m.nom AS magasin, ROUND(SUM(v.montant), 2) AS chiffre_affaires
+FROM ventes v JOIN magasins m ON m.id = v.magasin_id
+WHERE strftime('%m', v.date) = '03'
+GROUP BY m.nom ORDER BY chiffre_affaires DESC"""
+
+[[exemples]]
+question = "Évolution mensuelle des ventes de la catégorie Sport"
+sql = """SELECT strftime('%Y-%m', v.date) AS mois, ROUND(SUM(v.montant), 2) AS chiffre_affaires
+FROM ventes v JOIN produits p ON p.id = v.produit_id
+WHERE p.categorie = 'Sport'
+GROUP BY mois ORDER BY mois"""
+
+[[exemples]]
+question = "Top 5 des produits les plus vendus en quantité"
+sql = """SELECT p.nom AS produit, SUM(v.quantite) AS quantite_vendue
+FROM ventes v JOIN produits p ON p.id = v.produit_id
+GROUP BY p.nom ORDER BY quantite_vendue DESC LIMIT 5"""
+
+[[demo]]
+question = "CA par magasin en septembre ?"
+sql = """SELECT m.nom AS magasin, ROUND(SUM(v.montant), 2) AS chiffre_affaires
+FROM ventes v JOIN magasins m ON m.id = v.magasin_id
+WHERE strftime('%m', v.date) = '09'
+GROUP BY m.nom ORDER BY chiffre_affaires DESC"""
+
+[[demo]]
+question = "Et pour octobre ?"
+sql = """SELECT m.nom AS magasin, ROUND(SUM(v.montant), 2) AS chiffre_affaires
+FROM ventes v JOIN magasins m ON m.id = v.magasin_id
+WHERE strftime('%m', v.date) = '10'
+GROUP BY m.nom ORDER BY chiffre_affaires DESC"""
+
+[[demo]]
+question = "Évolution mensuelle du chiffre d'affaires"
+sql = """SELECT strftime('%Y-%m', date) AS mois, ROUND(SUM(montant), 2) AS chiffre_affaires
+FROM ventes GROUP BY mois ORDER BY mois"""
+
+[[demo]]
+question = "CA mensuel par région"
+sql = """SELECT strftime('%Y-%m', v.date) AS mois, m.region, ROUND(SUM(v.montant), 2) AS chiffre_affaires
+FROM ventes v JOIN magasins m ON m.id = v.magasin_id
+GROUP BY mois, m.region ORDER BY mois"""
+
+[[demo]]
+question = "Top 10 des produits en Électronique"
+sql = """SELECT p.nom AS produit, ROUND(SUM(v.montant), 2) AS chiffre_affaires
+FROM ventes v JOIN produits p ON p.id = v.produit_id
+WHERE p.categorie = 'Électronique'
+GROUP BY p.nom ORDER BY chiffre_affaires DESC LIMIT 10"""
+
+[[demo]]
+question = "Panier moyen en décembre"
+sql = """SELECT ROUND(AVG(montant), 2) AS panier_moyen FROM ventes
+WHERE strftime('%m', date) = '12'"""
+
+[[demo]]
+question = "Supprime toutes les ventes"
+sql = "DELETE FROM ventes"
