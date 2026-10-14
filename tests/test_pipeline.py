@@ -126,3 +126,37 @@ def test_journal(tmp_path, base_retail):
     journaliser(demo.repondre("Panier moyen en décembre", base_retail), "demo", str(fichier))
     entree = json.loads(fichier.read_text(encoding="utf-8"))
     assert entree["succes"] and entree["lignes"] == 1 and entree["question"] == "Panier moyen en décembre"
+
+
+def test_schema_avec_noms_pieges(tmp_path):
+    import sqlite3
+    chemin = tmp_path / "piege.db"
+    with sqlite3.connect(chemin) as conn:
+        conn.execute('CREATE TABLE "a""b" ("c""d" TEXT)')
+        conn.execute('INSERT INTO "a""b" VALUES (\'x\')')
+    assert "Table a\"b (1 lignes)" in base.lire_schema(chemin)
+
+
+def test_import_colonnes_en_double(tmp_path):
+    csv = "Prix €,Prix $,Année,annee\n1,2,3,4\n".encode()
+    chemin = base.importer_fichiers([("prix.csv", csv)], tmp_path / "i.db")
+    df = base.executer_requete(chemin, "SELECT * FROM prix")
+    assert list(df.columns) == ["prix", "prix_2", "annee", "annee_2"]
+
+
+def test_import_sqlite_corrompue(tmp_path):
+    with pytest.raises(base.ImportInvalide):
+        base.importer_fichiers([("x.db", b"SQLite format 3\x00" + b"\x00" * 50)], tmp_path / "i.db")
+
+
+def test_import_melange_sqlite_et_csv(tmp_path, base_vide):
+    with pytest.raises(base.ImportInvalide):
+        base.importer_fichiers([("a.db", base_vide.read_bytes()), ("b.csv", b"x\n1\n")], tmp_path / "i.db")
+
+
+def test_chemin_avec_caracteres_speciaux(tmp_path, base_vide):
+    dossier = tmp_path / "dossier #1 ?%"
+    dossier.mkdir()
+    cible = dossier / "base.db"
+    cible.write_bytes(base_vide.read_bytes())
+    assert base.lister_tables(cible) == ["t"]

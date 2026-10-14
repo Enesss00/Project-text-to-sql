@@ -134,7 +134,7 @@ def afficher_barre_laterale() -> None:
         st.sidebar.toggle("Synthèse en langage naturel", value=True, key="synthese_active")
         afficher_consommation()
     st.sidebar.button("Nouvelle conversation", on_click=reinitialiser_conversation,
-                      use_container_width=True)
+                      width="stretch")
 
 
 # --- Affichage d'une réponse ----------------------------------------------
@@ -176,10 +176,10 @@ def afficher_resultats(res: Resultat, index: int) -> None:
         return
     formats = {c: st.column_config.NumberColumn(format="localized")
                for c in df.select_dtypes("number").columns}
-    st.dataframe(df, hide_index=True, use_container_width=True, column_config=formats)
+    st.dataframe(df, hide_index=True, width="stretch", column_config=formats)
     if choix:
         st.altair_chart(graphiques.construire_graphique(df, choix, theme_actuel()),
-                        use_container_width=True, theme=None)
+                        width="stretch", theme=None)
     st.download_button("⬇️ Exporter en CSV", df.to_csv(index=False).encode("utf-8"),
                        file_name="resultats.csv", mime="text/csv", key=f"export_{index}")
 

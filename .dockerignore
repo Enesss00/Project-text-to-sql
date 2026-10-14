@@ -7,3 +7,5 @@ logs
 docs
 tests
 evals/resultats*
+.env
+.env.*

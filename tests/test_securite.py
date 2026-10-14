@@ -23,6 +23,7 @@ from text2sql.securite import (
     "WITH t AS (SELECT magasin_id FROM ventes) SELECT COUNT(*) FROM t",
     "SELECT date_inscription FROM clients",          # 'date' n'est pas un mot interdit
     "SELECT montant AS updated_total FROM ventes",    # 'updated_total' ≠ UPDATE
+    "SELECT replace(nom, '_', ' ') FROM produits",   # fonction replace() autorisée
 ])
 def test_requetes_lecture_acceptees(sql):
     assert valider_sql(sql) == sql.strip()
@@ -64,6 +65,7 @@ def test_point_virgule_refuse(sql):
     "WITH x AS (DELETE FROM ventes RETURNING *) SELECT * FROM x",
     "SELECT * FROM ventes WHERE id IN (SELECT id FROM ventes) UNION SELECT 1 FROM pragma_table_info('ventes')",
     "select 1 union select 2 from (drop table ventes)",
+    "WITH x AS (SELECT 1) REPLACE INTO magasins VALUES (1, 'a', 'b', 'c')",
 ])
 def test_mots_interdits_caches_refuses(sql):
     with pytest.raises(RequeteRefusee):

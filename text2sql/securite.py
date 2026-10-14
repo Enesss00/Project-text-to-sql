@@ -9,11 +9,12 @@ import re
 import sqlite3
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from text2sql.config import LIMITE_LIGNES, TIMEOUT_REQUETE_S
 
 MOTS_INTERDITS = (
-    "DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "PRAGMA", "CREATE", "REPLACE",
+    "DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "PRAGMA", "CREATE",
     "ATTACH", "DETACH", "VACUUM", "REINDEX", "TRUNCATE", "GRANT", "REVOKE",
 )
 
@@ -52,10 +53,12 @@ def valider_sql(sql: str) -> str:
         raise RequeteRefusee("Les commentaires SQL sont interdits.")
     if not re.match(r"^(SELECT|WITH)\b", sql, re.IGNORECASE):
         raise RequeteRefusee("Seules les requêtes commençant par SELECT ou WITH sont autorisées.")
-    # \bPRAGMA_ couvre aussi les fonctions pragma_xxx(), contournement possible de PRAGMA
-    interdit = re.search(rf"\b({'|'.join(MOTS_INTERDITS)})\b|\b(PRAGMA)_", sql, re.IGNORECASE)
+    # \bPRAGMA_ couvre aussi les fonctions pragma_xxx(), contournement possible de PRAGMA ;
+    # REPLACE n'est interdit que suivi de INTO, la fonction replace() restant autorisée
+    interdit = re.search(rf"\b({'|'.join(MOTS_INTERDITS)})\b|\b(PRAGMA)_|\b(REPLACE)\s+INTO\b",
+                         sql, re.IGNORECASE)
     if interdit:
-        mot = interdit.group(1) or interdit.group(2)
+        mot = next(g for g in interdit.groups() if g)
         raise RequeteRefusee(f"Mot-clé interdit : {mot.upper()}.")
     return sql
 
@@ -87,7 +90,7 @@ def _limiteur_de_temps(timeout_s: float):
 
 def ouvrir_lecture_seule(chemin: Path) -> sqlite3.Connection:
     """Ouvre la base en lecture seule (mode=ro), sans verrou applicatif."""
-    return sqlite3.connect(f"file:{Path(chemin).resolve()}?mode=ro", uri=True)
+    return sqlite3.connect(f"file:{quote(str(Path(chemin).resolve()))}?mode=ro", uri=True)
 
 
 def ouvrir_connexion_securisee(chemin: Path, timeout_s: float = TIMEOUT_REQUETE_S) -> sqlite3.Connection:

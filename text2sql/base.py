@@ -21,20 +21,25 @@ class ImportInvalide(Exception):
 
 # --- Schéma ------------------------------------------------------------------
 
+def ident(nom: str) -> str:
+    """Identifiant SQL entre guillemets, guillemets internes doublés (noms issus d'un fichier importé)."""
+    return '"' + nom.replace('"', '""') + '"'
+
+
 def _colonnes(conn: sqlite3.Connection, table: str) -> list[tuple[str, str]]:
     """Liste (nom, type) des colonnes d'une table, lue via PRAGMA."""
-    return [(r[1], r[2] or "TEXT") for r in conn.execute(f"PRAGMA table_info(\"{table}\")")]
+    return [(r[1], r[2] or "TEXT") for r in conn.execute(f"PRAGMA table_info({ident(table)})")]
 
 
 def _decrire_colonne(conn: sqlite3.Connection, table: str, nom: str, type_col: str) -> str:
     """Une ligne de schéma, enrichie des valeurs possibles ou de l'étendue des dates."""
     detail = f"  - {nom} {type_col}"
     if "date" in nom.lower():
-        debut, fin = conn.execute(f'SELECT MIN("{nom}"), MAX("{nom}") FROM "{table}"').fetchone()
+        debut, fin = conn.execute(f"SELECT MIN({ident(nom)}), MAX({ident(nom)}) FROM {ident(table)}").fetchone()
         return f"{detail} (du {debut} au {fin})"
     if type_col.upper() == "TEXT":
         valeurs = conn.execute(
-            f'SELECT DISTINCT "{nom}" FROM "{table}" WHERE "{nom}" IS NOT NULL LIMIT ?',
+            f"SELECT DISTINCT {ident(nom)} FROM {ident(table)} WHERE {ident(nom)} IS NOT NULL LIMIT ?",
             (MAX_VALEURS_LISTEES + 1,)).fetchall()
         if len(valeurs) <= MAX_VALEURS_LISTEES:
             detail += f" (valeurs : {', '.join(repr(v[0]) for v in valeurs)})"
@@ -43,7 +48,7 @@ def _decrire_colonne(conn: sqlite3.Connection, table: str, nom: str, type_col: s
 
 def decrire_table(conn: sqlite3.Connection, table: str) -> str:
     """Décrit une table : nombre de lignes et colonnes enrichies."""
-    nb = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+    nb = conn.execute(f"SELECT COUNT(*) FROM {ident(table)}").fetchone()[0]
     lignes = [f"Table {table} ({nb} lignes) :"]
     lignes += [_decrire_colonne(conn, table, nom, t) for nom, t in _colonnes(conn, table)]
     return "\n".join(lignes)
@@ -93,9 +98,18 @@ def lire_csv(contenu: bytes) -> pd.DataFrame:
     raise ImportInvalide("Encodage du CSV non reconnu.")
 
 
+def noms_uniques(noms: list[str]) -> list[str]:
+    """Normalise des noms de colonnes et suffixe les doublons (_2, _3…)."""
+    vus, resultat = {}, []
+    for nom in map(normaliser_nom, noms):
+        vus[nom] = vus.get(nom, 0) + 1
+        resultat.append(nom if vus[nom] == 1 else f"{nom}_{vus[nom]}")
+    return resultat
+
+
 def _preparer_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Normalise les noms de colonnes et convertit les dates au format ISO."""
-    df = df.rename(columns=lambda c: normaliser_nom(str(c)))
+    df.columns = noms_uniques([str(c) for c in df.columns])
     for col in df.columns:
         if "date" in col and not pd.api.types.is_numeric_dtype(df[col]):
             dates = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
@@ -109,8 +123,14 @@ def importer_fichiers(fichiers: list[tuple[str, bytes]], destination: Path) -> P
     destination.unlink(missing_ok=True)
     bases = [(n, c) for n, c in fichiers if c.startswith(ENTETE_SQLITE)]
     if bases:
+        if len(fichiers) > 1:
+            raise ImportInvalide("Importez soit une seule base SQLite, soit un ou plusieurs CSV.")
         destination.write_bytes(bases[0][1])
-        if not lister_tables(destination):
+        try:
+            tables = lister_tables(destination)
+        except sqlite3.DatabaseError as e:
+            raise ImportInvalide(f"Base SQLite illisible : {e}") from e
+        if not tables:
             raise ImportInvalide("La base SQLite importée ne contient aucune table.")
         return destination
     with closing(sqlite3.connect(destination)) as conn:
