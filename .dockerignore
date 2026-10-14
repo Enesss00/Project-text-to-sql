@@ -1,0 +1,9 @@
+.git
+__pycache__
+.pytest_cache
+.ruff_cache
+retail.db
+logs
+docs
+tests
+evals/resultats*

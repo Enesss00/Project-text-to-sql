@@ -12,7 +12,7 @@ from pathlib import Path
 from faker import Faker
 
 # Paramètres de génération
-DB_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("retail.db")
+DB_PATH = Path(__file__).resolve().parent / "retail.db"
 NB_MAGASINS = 10
 NB_PRODUITS = 100
 NB_CLIENTS = 500
@@ -131,13 +131,13 @@ def generer_ventes(magasins, produits, clients):
     return ventes
 
 
-def main():
+def main(chemin: Path = DB_PATH) -> None:
     random.seed(SEED)
     Faker.seed(SEED)
     fake = Faker("fr_FR")
 
-    DB_PATH.unlink(missing_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    chemin.unlink(missing_ok=True)
+    conn = sqlite3.connect(chemin)
     conn.executescript(SCHEMA)
 
     magasins = generer_magasins()
@@ -152,9 +152,9 @@ def main():
     conn.commit()
     conn.close()
 
-    print(f"Base créée : {DB_PATH} — {len(magasins)} magasins, {len(produits)} produits, "
+    print(f"Base créée : {chemin} — {len(magasins)} magasins, {len(produits)} produits, "
           f"{len(clients)} clients, {len(ventes)} ventes ({DEBUT} → {FIN})")
 
 
 if __name__ == "__main__":
-    main()
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else DB_PATH)

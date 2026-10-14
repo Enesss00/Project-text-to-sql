@@ -1,0 +1,17 @@
+[project]
+name = "text2sql"
+version = "1.0.0"
+description = "Interrogez vos données en français : Claude génère le SQL, l'exécute en lecture seule et trace le graphique."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

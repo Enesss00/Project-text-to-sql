@@ -4,9 +4,15 @@ import sqlite3
 
 import pytest
 
-import app
-from app import RequeteRefusee, ajouter_limit, nettoyer_sql, securiser_requete, valider_sql
-
+from text2sql.securite import (
+    RequeteRefusee,
+    ajouter_limit,
+    nettoyer_sql,
+    ouvrir_connexion_securisee,
+    ouvrir_lecture_seule,
+    securiser_requete,
+    valider_sql,
+)
 
 # --- Requêtes acceptées -----------------------------------------------------
 
@@ -108,12 +114,40 @@ def test_nettoyer_retire_balises_et_point_virgule():
 
 # --- Lecture seule au niveau de SQLite ---------------------------------------
 
-def test_connexion_en_lecture_seule(tmp_path, monkeypatch):
-    chemin = tmp_path / "test.db"
-    with sqlite3.connect(chemin) as conn:
-        conn.execute("CREATE TABLE t (id INTEGER)")
-    monkeypatch.setattr(app, "DB_PATH", chemin)
-    conn = app.ouvrir_connexion()
+def test_connexion_en_lecture_seule(base_vide):
+    conn = ouvrir_lecture_seule(base_vide)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         conn.execute("INSERT INTO t VALUES (1)")
+    conn.close()
+
+
+# --- Autorisateur SQLite (2e couche, indépendante du filtre) ----------------
+
+@pytest.mark.parametrize("sql", [
+    "INSERT INTO t VALUES (1)",
+    "DELETE FROM t",
+    "SELECT * FROM pragma_table_info('t')",
+    "ATTACH DATABASE ':memory:' AS autre",
+    "CREATE TEMP TABLE x (id INTEGER)",
+])
+def test_autorisateur_bloque_hors_lecture(base_vide, sql):
+    conn = ouvrir_connexion_securisee(base_vide)
+    with pytest.raises(sqlite3.DatabaseError):
+        conn.execute(sql)
+    conn.close()
+
+
+def test_autorisateur_laisse_passer_les_lectures(base_vide):
+    conn = ouvrir_connexion_securisee(base_vide)
+    sql = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 3) SELECT COUNT(*) FROM n"
+    assert conn.execute(sql).fetchone() == (3,)
+    assert conn.execute("SELECT COUNT(*), UPPER('a') FROM t").fetchone() == (2, "A")
+    conn.close()
+
+
+def test_requete_trop_longue_interrompue(base_vide):
+    conn = ouvrir_connexion_securisee(base_vide, timeout_s=0.2)
+    sql = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT MAX(i) FROM n"
+    with pytest.raises(sqlite3.OperationalError, match="interrupted"):
+        conn.execute(sql).fetchone()
     conn.close()
